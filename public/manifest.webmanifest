@@ -1,0 +1,10 @@
+{
+  "name": "Fichero Printer Lab",
+  "short_name": "Printer Lab",
+  "description": "Low-level control and print lab for the Fichero 6181 thermal printer.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0f1216",
+  "theme_color": "#0f1216",
+  "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
