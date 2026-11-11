@@ -15,6 +15,8 @@ export interface ImageLayout {
   /** Target width in dots. */
   width: number;
   rotate: 0 | 90 | 180 | 270;
+  flipH?: boolean;
+  flipV?: boolean;
 }
 
 export interface TextParams {
@@ -50,6 +52,7 @@ export function rasterizeImage(img: ImageBitmap, layout: ImageLayout): Rgba {
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.translate(width / 2, height / 2);
+  ctx.scale(layout.flipH ? -1 : 1, layout.flipV ? -1 : 1);
   ctx.rotate((layout.rotate * Math.PI) / 180);
   const drawW = swap ? height : width;
   const drawH = swap ? width : height;
@@ -89,6 +92,30 @@ export function rasterizeText(p: TextParams, width: number): Rgba {
   lines.forEach((line, i) => ctx.fillText(line, x, p.padding + i * step + step / 2));
   const data = ctx.getImageData(0, 0, width, height);
   return { data: data.data, width, height };
+}
+
+/** Width in dots of the widest line of `p.text` (without wrapping), plus padding on both sides. */
+export function measureText(p: TextParams): number {
+  const ctx = makeCanvas(1, 1).ctx;
+  ctx.font = `${p.bold ? '700' : '400'} ${p.size}px ${p.font}`;
+  const widest = Math.max(0, ...p.text.split('\n').map((line) => ctx.measureText(line).width));
+  return Math.ceil(widest + p.padding * 2);
+}
+
+/** Render text straight to 1-bit with a plain threshold, on the main thread. Fast enough for labels and ticker lines. */
+export function textBitmap(p: TextParams, width: number): Bitmap1 {
+  const rgba = rasterizeText(p, width);
+  const n = rgba.width * rgba.height;
+  const data = new Uint8Array(n);
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    if (0.299 * rgba.data[j] + 0.587 * rgba.data[j + 1] + 0.114 * rgba.data[j + 2] < 128) data[i] = 1;
+  }
+  return { width: rgba.width, height: rgba.height, data };
+}
+
+/** A one-line caption strip, e.g. for contact sheets and sweeps. */
+export function labelBitmap(text: string, width: number, size = 32): Bitmap1 {
+  return textBitmap({ text, font: 'monospace', size, bold: true, align: 'left', lineHeight: 1.2, padding: 8 }, width);
 }
 
 let worker: Worker | null = null;

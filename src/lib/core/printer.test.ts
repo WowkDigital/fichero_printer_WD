@@ -318,3 +318,38 @@ describe('Printer.print', () => {
     expect(transport.rasterBytes).toBe(40);
   });
 });
+
+describe('Printer streaming job', () => {
+  it('sends setup once, every frame, then stop, and reports the ACK', async () => {
+    const { printer, transport, packets } = await connectMock();
+    const begin = printer.beginStream(FAST);
+    await vi.runAllTimersAsync();
+    await begin;
+    expect(printer.busy).toBe(true);
+
+    for (const n of [25, 7]) {
+      const sent = printer.streamData(payloadOf(n), FAST);
+      await vi.runAllTimersAsync();
+      expect(await sent).toBe(n);
+    }
+    const end = printer.endStream(FAST);
+    await vi.runAllTimersAsync();
+    expect(await end).toBe(true);
+    expect(printer.busy).toBe(false);
+
+    const tx = packets.filter((p) => p.dir === 'tx');
+    expect(tx.filter((p) => p.note === 'Enable printer')).toHaveLength(1);
+    expect(tx.filter((p) => p.note === 'Stop print')).toHaveLength(1);
+    expect(tx.at(-1)?.note).toBe('Stop print');
+    expect(transport.rasterBytes).toBe(0);
+  });
+
+  it('stops sending data when aborted', async () => {
+    const { printer } = await connectMock();
+    const controller = new AbortController();
+    controller.abort();
+    const sent = printer.streamData(payloadOf(50), FAST, controller.signal);
+    await vi.runAllTimersAsync();
+    expect(await sent).toBe(0);
+  });
+});

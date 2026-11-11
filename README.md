@@ -6,6 +6,10 @@ A browser app for experimenting with the Fichero 6181 / AiYin A4 thermal printer
 
 - **Low-level control**: connect to the printer and send raw commands over Bluetooth Low Energy.
 - **Print lab**: print from image, text or test-pattern sources, with tunable dithering and job parameters.
+- **Preview**: zoom (buttons, ctrl+wheel, pinch, drag to pan) and a margin overlay showing blank rows and white space around the ink, in millimetres.
+- **Output modes** (header, next to Print): *Print*; *Blank run*, which sends all-white rows so the printer feeds the same paper with the same timing and motor sound without burning anything; and *Simulate*, which sends nothing and measures time and paper with the current pacing.
+- **Algorithms gallery**: the current source rendered with every dither algorithm (or a threshold, gamma, brightness, contrast or halftone sweep) side by side, with synced zoom, one-click "Use" and a printable contact sheet.
+- **Lab**: a timed ticker (date and time, lines of text or a counter, printed every N ms as one streamed job or as separate jobs) and parameter sweeps (density, chunk delay, chunk size, repeat) with a result table.
 - **Packet inspector**: a live view of every packet sent and received, plus a raw hex console.
 - **Demo mode**: a simulated printer for working on the app without hardware.
 

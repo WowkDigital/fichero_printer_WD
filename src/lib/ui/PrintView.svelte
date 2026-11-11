@@ -3,7 +3,9 @@
   import { DOTS_PER_MM, HEAD_FULL, HEAD_STANDARD, TEAR_BAR_ROWS } from '../core/protocol';
   import { blackRatio } from '../image/dither';
   import { PATTERNS } from '../image/patterns';
-  import { DEFAULT_TONE, DITHER_MODES } from '../image/types';
+  import { DEFAULT_TONE, DIFFUSION_MODES, DITHER_MODES } from '../image/types';
+  import { OUTPUT_MODES } from '../lab/config';
+  import { formatBytes, formatDuration, formatPaper } from './format';
   import Preview from './Preview.svelte';
   import Section from './Section.svelte';
   import Segmented from './Segmented.svelte';
@@ -12,13 +14,6 @@
 
   const s = $derived(app.settings);
   const src = $derived(app.settings.source);
-
-  // Re-render the preview whenever anything that affects the bitmap changes.
-  $effect(() => {
-    JSON.stringify([s.tone, s.source, s.raster.headDots]);
-    app.image;
-    app.scheduleRender();
-  });
 
   const stats = $derived.by(() => {
     const bmp = app.bitmap;
@@ -29,25 +24,14 @@
       black: `${(blackRatio(bmp) * 100).toFixed(1)}%`,
       bytes: formatBytes(app.payloadBytes),
       time: formatDuration(app.estimatedSeconds),
+      paper: formatPaper(app.paperRows),
     };
   });
 
-  const progressPct = $derived(
-    app.jobProgress && app.jobProgress.totalBytes > 0 ? (app.jobProgress.sentBytes / app.jobProgress.totalBytes) * 100 : 0,
-  );
-  const throughput = $derived(
-    app.jobProgress && app.jobProgress.elapsedMs > 0 ? (app.jobProgress.sentBytes / app.jobProgress.elapsedMs) * 1000 : 0,
-  );
-
-  const isDiffusion = $derived(!['threshold', 'bayer2', 'bayer4', 'bayer8', 'halftone'].includes(s.tone.dither));
+  const isDiffusion = $derived(DIFFUSION_MODES.includes(s.tone.dither));
+  const outputBadge = $derived(s.output === 'print' ? '' : (OUTPUT_MODES.find((m) => m.id === s.output)?.label ?? ''));
   const ditherLabel = $derived(DITHER_MODES.find((m) => m.id === s.tone.dither)?.label ?? '');
 
-  function formatBytes(n: number) {
-    return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(2)} MB` : n >= 1024 ? `${(n / 1024).toFixed(1)} kB` : `${n} B`;
-  }
-  function formatDuration(sec: number) {
-    return sec >= 60 ? `${Math.floor(sec / 60)} min ${Math.round(sec % 60)} s` : `${sec.toFixed(1)} s`;
-  }
   function onFile(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
     const file = input.files?.[0];
@@ -56,15 +40,16 @@
   }
 </script>
 
-<div class="mx-auto max-w-6xl p-4 pb-28 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-start lg:gap-4">
+<div class="mx-auto max-w-6xl p-4 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-start lg:gap-4">
   <!-- Preview column (sticky on wide screens) -->
   <div class="space-y-3 lg:sticky lg:top-4">
-    <Preview bitmap={app.bitmap} headDots={s.raster.headDots} align={s.raster.align} offsetDots={s.raster.offsetDots} busy={app.rendering} />
+    <Preview bitmap={app.bitmap} raster={s.raster} busy={app.rendering} badge={outputBadge} />
     {#if stats}
-      <dl class="grid grid-cols-2 gap-x-4 gap-y-2 px-1 text-sm sm:grid-cols-5">
+      <dl class="grid grid-cols-2 gap-x-4 gap-y-2 px-1 text-sm sm:grid-cols-3">
         <div><dt class="text-xs text-dim">Bitmap</dt><dd class="font-mono text-[13px]">{stats.size}</dd></div>
         <div><dt class="text-xs text-dim">On paper</dt><dd class="font-mono text-[13px]">{stats.mm}</dd></div>
         <div><dt class="text-xs text-dim">Black coverage</dt><dd class="font-mono text-[13px]">{stats.black}</dd></div>
+        <div><dt class="text-xs text-dim">Paper used</dt><dd class="font-mono text-[13px]">{stats.paper}</dd></div>
         <div><dt class="text-xs text-dim">Payload</dt><dd class="font-mono text-[13px]">{stats.bytes}</dd></div>
         <div><dt class="text-xs text-dim">Min. transfer time</dt><dd class="font-mono text-[13px]">{stats.time}</dd></div>
       </dl>
@@ -112,6 +97,10 @@
               { value: 270, label: '270°' },
             ]}
           />
+          <div class="divide-y divide-line border-t border-line">
+            <Toggle label="Mirror (flip horizontally)" bind:checked={src.image.flipH} />
+            <Toggle label="Flip vertically" bind:checked={src.image.flipV} />
+          </div>
         {/if}
       {:else if src.type === 'text'}
         <div>
@@ -169,6 +158,9 @@
       <Slider label="Brightness" bind:value={s.tone.brightness} min={-100} max={100} />
       <Slider label="Contrast" bind:value={s.tone.contrast} min={-100} max={100} />
       <Slider label="Gamma" bind:value={s.tone.gamma} min={0.1} max={3} step={0.05} hint="Above 1 brightens midtones." />
+      {#if src.type !== 'pattern'}
+        <Slider label="Sharpen" bind:value={s.tone.sharpen} min={0} max={300} step={5} unit="%" hint="Unsharp mask before dithering; brings out edges and fine detail." />
+      {/if}
       {#if s.tone.dither === 'halftone'}
         <Slider label="Halftone cell" bind:value={s.tone.halftoneCell} min={4} max={16} unit="dots" />
       {/if}
@@ -176,7 +168,10 @@
         <Toggle label="Serpentine scan" bind:checked={s.tone.serpentine} hint="Alternate direction per row to reduce directional artifacts." />
       {/if}
       <Toggle label="Invert" bind:checked={s.tone.invert} />
-      <button type="button" class="btn btn-sm" onclick={() => (app.settings.tone = { ...DEFAULT_TONE })}>Reset tone</button>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn btn-sm" onclick={() => (app.settings.tone = { ...DEFAULT_TONE })}>Reset tone</button>
+        <button type="button" class="btn btn-sm" onclick={() => (app.tab = 'gallery')}>Compare in gallery</button>
+      </div>
     </Section>
 
     <Section title="Paper layout" summary="{s.raster.headDots} dots · {s.raster.align} · tail {s.raster.tailRows} rows">
@@ -233,54 +228,5 @@
         <Toggle label="Write with response" bind:checked={s.job.writeWithResponse} hint="Slower, but each chunk is confirmed by the link layer." />
       </div>
     </Section>
-  </div>
-</div>
-
-<!-- Sticky action bar, always reachable with the thumb -->
-<div class="pointer-events-none fixed inset-x-0 bottom-[calc(60px+env(safe-area-inset-bottom))] z-10 px-3 pb-3 md:bottom-0 md:left-20">
-  <div class="card pointer-events-auto mx-auto max-w-2xl p-3 shadow-lg shadow-black/20">
-    {#if app.jobRunning}
-      <div class="flex items-center gap-3">
-        <div class="min-w-0 flex-1">
-          <div class="text-sm">
-            <span class="block font-semibold" aria-live="polite">
-              {app.jobProgress?.phase === 'finish' ? 'Finishing…' : app.jobProgress?.phase === 'setup' ? 'Starting…' : `Sending ${progressPct.toFixed(0)}%`}
-            </span>
-            <span class="block truncate font-mono text-xs text-dim">
-              {formatBytes(app.jobProgress?.sentBytes ?? 0)} / {formatBytes(app.jobProgress?.totalBytes ?? 0)} · {formatBytes(Math.round(throughput))}/s
-            </span>
-          </div>
-          <div class="mt-1.5 h-2 overflow-hidden rounded-full bg-raised" role="progressbar" aria-label="Print progress" aria-valuenow={Math.round(progressPct)} aria-valuemin={0} aria-valuemax={100}>
-            <div class="h-full rounded-full bg-accent" style:width="{progressPct}%"></div>
-          </div>
-        </div>
-        <button type="button" class="btn btn-danger" onclick={() => app.cancelPrint()}>Cancel</button>
-      </div>
-    {:else}
-      <div class="flex items-center gap-3">
-        <div class="min-w-0 flex-1 text-sm">
-          {#if app.jobResult}
-            <p class="font-semibold {app.jobResult.cancelled || app.jobResult.acknowledged === false ? 'text-warn' : 'text-ok'}">
-              {app.jobResult.cancelled ? 'Cancelled' : app.jobResult.acknowledged === false ? 'Sent, no ACK from printer' : app.jobResult.acknowledged ? 'Printed, ACK received' : 'Sent'}
-            </p>
-            <p class="truncate font-mono text-xs text-dim">
-              {formatBytes(app.jobResult.sentBytes)} in {formatDuration(app.jobResult.durationMs / 1000)}
-            </p>
-          {:else if !app.connected}
-            <p class="text-dim">Connect a printer to print.</p>
-          {:else if !app.bitmap}
-            <p class="text-dim">Nothing to print yet.</p>
-          {:else}
-            <p class="font-semibold">Ready</p>
-            <p class="truncate font-mono text-xs text-dim">{stats?.bytes} · about {stats?.time}</p>
-          {/if}
-        </div>
-        {#if app.connected}
-          <button type="button" class="btn btn-primary min-w-28" disabled={!app.bitmap || app.rendering} onclick={() => app.print()}>Print</button>
-        {:else}
-          <button type="button" class="btn btn-primary" onclick={() => (app.tab = 'device')}>Connect</button>
-        {/if}
-      </div>
-    {/if}
   </div>
 </div>

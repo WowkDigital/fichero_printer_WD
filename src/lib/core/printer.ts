@@ -193,36 +193,81 @@ export class Printer {
       this.printing = true;
       const started = performance.now();
       const elapsed = () => performance.now() - started;
-      const chunk = Math.max(1, Math.round(opts.chunkSize));
       let sent = 0;
       let acknowledged: boolean | null = null;
       try {
         onProgress?.({ phase: 'setup', sentBytes: 0, totalBytes: payload.length, elapsedMs: 0 });
-        if (opts.sendDensity) await this.tx(Cmd.density(opts.density));
-        if (opts.sendPaperMode) await this.tx(Cmd.paperMode(opts.paperMode));
-        if (opts.sendWakeup) await this.tx(Cmd.wakeup());
-        if (opts.sendEnable) await this.tx(Cmd.enable());
-
-        while (sent < payload.length && !signal?.aborted) {
-          const part = payload.subarray(sent, sent + chunk);
-          await this.tx(part, opts.writeWithResponse, sent === 0 ? null : `Raster data @${sent}`);
-          sent += part.length;
-          onProgress?.({ phase: 'data', sentBytes: sent, totalBytes: payload.length, elapsedMs: elapsed() });
-          if (opts.chunkDelayMs > 0) await sleep(opts.chunkDelayMs);
-        }
-
+        await this.setupCommands(opts);
+        sent = await this.sendPaced(payload, opts, signal, (n) =>
+          onProgress?.({ phase: 'data', sentBytes: n, totalBytes: payload.length, elapsedMs: elapsed() }),
+        );
         onProgress?.({ phase: 'finish', sentBytes: sent, totalBytes: payload.length, elapsedMs: elapsed() });
-        if (!signal?.aborted && opts.finishPauseMs > 0) await sleep(opts.finishPauseMs);
-        if (opts.sendStop) {
-          const ack = this.waitForRx((rx) => rx.includes(STOP_ACK), opts.ackTimeoutMs);
-          await this.tx(Cmd.stop());
-          acknowledged = (await ack) !== null;
-        }
+        acknowledged = await this.finishCommands(opts, signal);
       } finally {
         this.printing = false;
       }
       return { sentBytes: sent, totalBytes: payload.length, durationMs: elapsed(), acknowledged, cancelled: !!signal?.aborted };
     });
+  }
+
+  /**
+   * Streaming job, in three steps: `beginStream`, any number of `streamData` calls
+   * (for example one raster frame per clock tick), then `endStream`.
+   * The heartbeat stays paused until `endStream`.
+   */
+  beginStream(opts: JobOptions): Promise<void> {
+    return this.enqueue(async () => {
+      this.printing = true;
+      try {
+        await this.setupCommands(opts);
+      } catch (err) {
+        this.printing = false;
+        throw err;
+      }
+    });
+  }
+
+  streamData(payload: Uint8Array, opts: JobOptions, signal?: AbortSignal): Promise<number> {
+    return this.enqueue(() => this.sendPaced(payload, opts, signal));
+  }
+
+  endStream(opts: JobOptions, signal?: AbortSignal): Promise<boolean | null> {
+    return this.enqueue(async () => {
+      try {
+        return await this.finishCommands(opts, signal);
+      } finally {
+        this.printing = false;
+      }
+    });
+  }
+
+  private async setupCommands(opts: JobOptions): Promise<void> {
+    if (opts.sendDensity) await this.tx(Cmd.density(opts.density));
+    if (opts.sendPaperMode) await this.tx(Cmd.paperMode(opts.paperMode));
+    if (opts.sendWakeup) await this.tx(Cmd.wakeup());
+    if (opts.sendEnable) await this.tx(Cmd.enable());
+  }
+
+  private async sendPaced(payload: Uint8Array, opts: JobOptions, signal?: AbortSignal, onSent?: (n: number) => void): Promise<number> {
+    const chunk = Math.max(1, Math.round(opts.chunkSize));
+    let sent = 0;
+    while (sent < payload.length && !signal?.aborted) {
+      const part = payload.subarray(sent, sent + chunk);
+      await this.tx(part, opts.writeWithResponse, sent === 0 ? null : `Raster data @${sent}`);
+      sent += part.length;
+      onSent?.(sent);
+      if (opts.chunkDelayMs > 0) await sleep(opts.chunkDelayMs);
+    }
+    return sent;
+  }
+
+  /** Finish pause, then stop + wait for the ACK. Returns null when the stop command is disabled. */
+  private async finishCommands(opts: JobOptions, signal?: AbortSignal): Promise<boolean | null> {
+    if (!signal?.aborted && opts.finishPauseMs > 0) await sleep(opts.finishPauseMs);
+    if (!opts.sendStop) return null;
+    const ack = this.waitForRx((rx) => rx.includes(STOP_ACK), opts.ackTimeoutMs);
+    await this.tx(Cmd.stop());
+    return (await ack) !== null;
   }
 
   // --- internals ---

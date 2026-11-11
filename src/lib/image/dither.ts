@@ -74,6 +74,7 @@ const KERNELS: Partial<Record<DitherMode, Kernel>> = {
     [-2, 1, 2], [-1, 1, 4], [0, 1, 5], [1, 1, 4], [2, 1, 2],
     [-1, 2, 2], [0, 2, 3], [1, 2, 2],
   ]),
+  'sierra-lite': kernel(4, [[1, 0, 2], [-1, 1, 1], [0, 1, 1]]),
 };
 
 function bayerMatrix(n: number): Float32Array {
@@ -195,6 +196,45 @@ function halftone(
   return out;
 }
 
+/** White-noise threshold with a fixed seed, so the preview and the print match. */
+function randomDither(gray: Float32Array, bias: number): Uint8Array {
+  const out = new Uint8Array(gray.length);
+  let seed = 0x9e3779b9;
+  for (let i = 0; i < gray.length; i++) {
+    // mulberry32
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    const r = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    if (gray[i] + bias < (r * 254 + 0.5)) out[i] = 1;
+  }
+  return out;
+}
+
+/** Unsharp mask with a 3x3 box blur. amount is in percent (100 = add the full detail once). */
+export function sharpen(gray: Float32Array, width: number, height: number, amount: number): Float32Array {
+  if (amount <= 0 || width < 3 || height < 3) return gray;
+  const k = amount / 100;
+  const out = new Float32Array(gray.length);
+  for (let y = 0; y < height; y++) {
+    const y0 = y > 0 ? y - 1 : y;
+    const y1 = y < height - 1 ? y + 1 : y;
+    for (let x = 0; x < width; x++) {
+      const x0 = x > 0 ? x - 1 : x;
+      const x1 = x < width - 1 ? x + 1 : x;
+      let sum = 0;
+      for (const yy of [y0, y, y1]) {
+        const row = yy * width;
+        sum += gray[row + x0] + gray[row + x] + gray[row + x1];
+      }
+      const v = gray[y * width + x];
+      const s = v + k * (v - sum / 9);
+      out[y * width + x] = s < 0 ? 0 : s > 255 ? 255 : s;
+    }
+  }
+  return out;
+}
+
 export function ditherGray(
   gray: Float32Array,
   width: number,
@@ -222,6 +262,9 @@ export function ditherGray(
     case 'halftone':
       data = halftone(gray, width, height, p.halftoneCell, bias);
       break;
+    case 'random':
+      data = randomDither(gray, bias);
+      break;
     default: {
       const k = KERNELS[p.dither] ?? KERNELS['floyd-steinberg']!;
       data = errorDiffusion(gray, width, height, k, p);
@@ -236,7 +279,8 @@ export function processRgba(
   height: number,
   p: ToneParams,
 ): Bitmap1 {
-  return ditherGray(applyTone(rgbaToGray(rgba, width, height), p), width, height, p);
+  const gray = sharpen(rgbaToGray(rgba, width, height), width, height, p.sharpen ?? 0);
+  return ditherGray(applyTone(gray, p), width, height, p);
 }
 
 export function blackRatio(b: Bitmap1): number {
