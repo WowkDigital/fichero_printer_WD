@@ -25,7 +25,7 @@ export interface Settings {
   logRasterData: boolean;
   source: {
     type: SourceType;
-    image: { fit: 'head' | 'scale'; scalePct: number; rotate: 0 | 90 | 180 | 270; flipH: boolean; flipV: boolean };
+    image: { fit: 'head' | 'scale'; scalePct: number; printScalePct: number; rotate: 0 | 90 | 180 | 270; flipH: boolean; flipV: boolean };
     text: TextParams;
     pattern: { id: PatternId; heightMm: number; cell: number };
   };
@@ -46,7 +46,7 @@ export function defaultSettings(): Settings {
     logRasterData: true,
     source: {
       type: 'pattern',
-      image: { fit: 'head', scalePct: 100, rotate: 0, flipH: false, flipV: false },
+      image: { fit: 'head', scalePct: 100, printScalePct: 100, rotate: 0, flipH: false, flipV: false },
       text: {
         text: 'Fichero 6181\nThermal print test',
         font: 'sans-serif',
@@ -256,6 +256,7 @@ class AppState {
 
   /** Debounced re-render of the 1-bit preview from the current source and tone settings. */
   scheduleRender() {
+    this.rendering = true;
     const token = ++this.renderToken;
     if (this.renderTimer) clearTimeout(this.renderTimer);
     this.renderTimer = setTimeout(() => void this.render(token), 120);
@@ -281,8 +282,10 @@ class AppState {
     }
     if (source.type === 'text') return ditherInWorker(crop(rasterizeText($state.snapshot(source.text), raster.headDots)), tone);
     if (this.image) {
-      const width = source.image.fit === 'head' ? raster.headDots : (this.image.width * source.image.scalePct) / 100;
-      return ditherInWorker(crop(rasterizeImage(this.image, { width, rotate: source.image.rotate, flipH: source.image.flipH, flipV: source.image.flipV })), tone);
+      const { fit, scalePct, printScalePct, rotate, flipH, flipV } = source.image;
+      const baseWidth = fit === 'head' ? raster.headDots : (this.image.width * scalePct) / 100;
+      const width = printScalePct < 100 ? (Math.min(baseWidth, raster.headDots) * printScalePct) / 100 : baseWidth;
+      return ditherInWorker(crop(rasterizeImage(this.image, { width, rotate, flipH, flipV })), tone);
     }
     return null;
   }

@@ -3,6 +3,7 @@
   import { DOTS_PER_MM, HEAD_FULL, HEAD_STANDARD, TEAR_BAR_ROWS } from '../core/protocol';
   import { blackRatio } from '../image/dither';
   import { PATTERNS } from '../image/patterns';
+  import { AUTO_TONE_PRESETS, STATIC_TONE_PRESETS, autoTone } from '../image/tone-presets';
   import { DEFAULT_TONE, DIFFUSION_MODES, DITHER_MODES } from '../image/types';
   import { OUTPUT_MODES } from '../lab/config';
   import { formatBytes, formatDuration, formatPaper } from './format';
@@ -31,6 +32,21 @@
   const isDiffusion = $derived(DIFFUSION_MODES.includes(s.tone.dither));
   const outputBadge = $derived(s.output === 'print' ? '' : (OUTPUT_MODES.find((m) => m.id === s.output)?.label ?? ''));
   const ditherLabel = $derived(DITHER_MODES.find((m) => m.id === s.tone.dither)?.label ?? '');
+  let appliedPreset = $state('');
+
+  function applyPreset(event: Event) {
+    const select = event.currentTarget as HTMLSelectElement;
+    const automatic = AUTO_TONE_PRESETS.find((preset) => preset.id === select.value);
+    const fixed = STATIC_TONE_PRESETS.find((preset) => preset.label === select.value);
+    if (automatic && app.image) {
+      s.tone = autoTone(app.image, automatic.id);
+      appliedPreset = automatic.label;
+    } else if (fixed) {
+      s.tone = { ...DEFAULT_TONE, ...fixed.tone };
+      appliedPreset = fixed.label;
+    }
+    select.value = '';
+  }
 
   function onFile(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
@@ -92,6 +108,7 @@
           {#if src.image.fit === 'scale'}
             <Slider label="Scale" bind:value={src.image.scalePct} min={5} max={400} unit="%" hint="100% prints one image pixel per dot." />
           {/if}
+          <Slider label="Print scale" bind:value={src.image.printScalePct} min={10} max={100} unit="%" hint="Reduces width and height proportionally, leaving white space across the paper." />
           <Segmented
             label="Rotation"
             bind:value={src.image.rotate}
@@ -151,6 +168,23 @@
     </section>
 
     <Section title="Tone and dithering" summary="{ditherLabel} · gamma {s.tone.gamma}" open>
+      <div>
+        <label class="label" for="tone-preset">Tone preset</label>
+        <select id="tone-preset" class="field mt-1.5" onchange={applyPreset}>
+          <option value="">Choose a preset</option>
+          <optgroup label="Fixed settings">
+            {#each STATIC_TONE_PRESETS as preset (preset.label)}
+              <option value={preset.label}>{preset.label}</option>
+            {/each}
+          </optgroup>
+          <optgroup label="Based on uploaded image" disabled={src.type !== 'image' || !app.image}>
+            {#each AUTO_TONE_PRESETS as preset (preset.id)}
+              <option value={preset.id}>{preset.label}</option>
+            {/each}
+          </optgroup>
+        </select>
+        <span class="sr-only" aria-live="polite">{appliedPreset ? `Applied ${appliedPreset}` : ''}</span>
+      </div>
       <div>
         <label class="label" for="print-dither">Algorithm</label>
         <select id="print-dither" class="field mt-1.5" bind:value={s.tone.dither}>

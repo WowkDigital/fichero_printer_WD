@@ -20,11 +20,12 @@
 </script>
 
 <div>
-  <div class="flex items-center justify-between gap-3">
-    <label class="label" for={id}>{label}</label>
-    <div class="flex items-center gap-1.5">
+  <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_auto] items-center gap-2">
+    <label class="label break-words" for={id}>{label}</label>
+    <input {id} class="min-w-0" type="range" {min} {max} {step} bind:value />
+    <div class="flex items-center gap-1">
       <input
-        class="field !min-h-9 !w-20 !py-1 text-right font-mono !text-[15px]"
+        class="field !min-h-9 !w-17 !px-1 !py-1 text-right font-mono !text-[14px]"
         type="number"
         inputmode="decimal"
         {min}
@@ -34,9 +35,8 @@
         onchange={commit}
         aria-label="{label} value"
       />
-      {#if unit}<span class="w-7 text-xs text-dim">{unit}</span>{/if}
+      {#if unit}<span class="text-xs text-dim">{unit}</span>{/if}
     </div>
   </div>
-  <input {id} type="range" {min} {max} {step} bind:value />
   {#if hint}<p class="text-xs text-dim">{hint}</p>{/if}
 </div>

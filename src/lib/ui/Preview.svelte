@@ -27,6 +27,10 @@
   let fitZoom = $state(0.4);
   let showMargins = $state(true);
   let showA4 = $state(false);
+  let showGrid = $state(false);
+  let gridColumns = $state(2);
+  let gridRows = $state(2);
+  const gridSizes = [2, 3, 4, 5, 6];
 
   const scale = $derived(zoom || fitZoom);
   const lead = $derived(Math.max(0, Math.round(raster.leadRows)));
@@ -92,6 +96,26 @@
       }
     }
     ctx.putImageData(image, 0, 0);
+
+    if (showA4 && showGrid) {
+      ctx.beginPath();
+      for (let column = 1; column < gridColumns; column++) {
+        const x = (column * A4_WIDTH) / gridColumns;
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, A4_HEIGHT);
+      }
+      for (let row = 1; row < gridRows; row++) {
+        const y = (row * A4_HEIGHT) / gridRows;
+        ctx.moveTo(0, y);
+        ctx.lineTo(A4_WIDTH, y);
+      }
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 9;
+      ctx.stroke();
+      ctx.strokeStyle = '#2563eb';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    }
 
     ctx.translate(headLeft, 0);
     if (showA4 && paperRows < A4_HEIGHT) {
@@ -232,6 +256,11 @@
       <button type="button" class="btn btn-sm !px-2.5" disabled={!bitmap} aria-pressed={showA4} onclick={() => { showA4 = !showA4; zoom = 0; }}>
         A4 portrait
       </button>
+      {#if showA4}
+        <button type="button" class="btn btn-sm !px-2.5" disabled={!bitmap} aria-pressed={showGrid} onclick={() => (showGrid = !showGrid)}>
+          Grid
+        </button>
+      {/if}
       <button type="button" class="btn btn-sm !px-2.5" disabled={!bitmap} aria-pressed={showMargins} onclick={() => (showMargins = !showMargins)} title="Show margins">
         Margins
       </button>
@@ -248,6 +277,22 @@
       <button type="button" class="btn btn-sm !px-3" disabled={!bitmap} onclick={() => step(1.25)} aria-label="Zoom in">+</button>
     </div>
   </div>
+  {#if showA4 && showGrid}
+    <div class="flex flex-wrap items-center gap-3 border-b border-line px-3 py-2 text-xs">
+      <label class="flex items-center gap-2">
+        Columns
+        <select class="field !min-h-8 !w-auto !py-1" bind:value={gridColumns}>
+          {#each gridSizes as size (size)}<option value={size}>{size}</option>{/each}
+        </select>
+      </label>
+      <label class="flex items-center gap-2">
+        Rows
+        <select class="field !min-h-8 !w-auto !py-1" bind:value={gridRows}>
+          {#each gridSizes as size (size)}<option value={size}>{size}</option>{/each}
+        </select>
+      </label>
+    </div>
+  {/if}
   <div
     bind:this={viewport}
     class="max-h-[46dvh] overflow-auto bg-raised p-3 lg:max-h-[calc(100dvh-19rem)] {showA4 && bitmap ? 'h-[46dvh] lg:h-[calc(100dvh-19rem)]' : ''} {dragging ? 'cursor-grabbing' : zoom ? 'cursor-grab' : ''}"
