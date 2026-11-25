@@ -158,6 +158,9 @@ class AppState {
 
   resetSettings() {
     this.settings = defaultSettings();
+    this.setHeartbeat(this.settings.heartbeatSec);
+    this.rendering = true;
+    this.scheduleRender();
   }
 
   // --- connection ---
@@ -253,8 +256,9 @@ class AppState {
 
   /** Debounced re-render of the 1-bit preview from the current source and tone settings. */
   scheduleRender() {
+    const token = ++this.renderToken;
     if (this.renderTimer) clearTimeout(this.renderTimer);
-    this.renderTimer = setTimeout(() => void this.render(), 120);
+    this.renderTimer = setTimeout(() => void this.render(token), 120);
   }
 
   /**
@@ -283,8 +287,7 @@ class AppState {
     return null;
   }
 
-  private async render() {
-    const token = ++this.renderToken;
+  private async render(token: number) {
     const tone = $state.snapshot(this.settings.tone);
     this.rendering = true;
     try {

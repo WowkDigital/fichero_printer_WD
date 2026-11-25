@@ -9,13 +9,16 @@
     bitmap: Bitmap1 | null;
     raster: RasterOptions;
     busy: boolean;
+    blank?: boolean;
     /** Shown in the corner, e.g. "Blank run". */
     badge?: string;
   }
-  let { bitmap, raster, busy, badge = '' }: Props = $props();
+  let { bitmap, raster, busy, blank = false, badge = '' }: Props = $props();
 
   const MIN_ZOOM = 0.05;
   const MAX_ZOOM = 16;
+  const A4_WIDTH = 210 * DOTS_PER_MM;
+  const A4_HEIGHT = 297 * DOTS_PER_MM;
 
   let canvas = $state<HTMLCanvasElement>();
   let viewport = $state<HTMLDivElement>();
@@ -23,10 +26,14 @@
   let zoom = $state(0);
   let fitZoom = $state(0.4);
   let showMargins = $state(true);
+  let showA4 = $state(false);
 
   const scale = $derived(zoom || fitZoom);
   const lead = $derived(Math.max(0, Math.round(raster.leadRows)));
   const tail = $derived(Math.max(0, Math.round(raster.tailRows)));
+  const paperRows = $derived(lead + (bitmap?.height ?? 0) + tail);
+  const previewWidth = $derived(showA4 ? A4_WIDTH : raster.headDots);
+  const headLeft = $derived(Math.floor((previewWidth - raster.headDots) / 2));
 
   /** Where the bitmap's left edge lands on the head. */
   const x0 = $derived.by(() => {
@@ -38,9 +45,9 @@
   /** Margins around the inked area, in dots, on the paper as it will come out. */
   const margins = $derived.by(() => {
     if (!bitmap) return null;
-    const ink = inkBounds(bitmap);
+    const ink = blank ? null : inkBounds(bitmap);
     const head = raster.headDots;
-    const paper = lead + bitmap.height + tail;
+    const paper = paperRows;
     if (!ink) return { blank: true, paper, top: 0, bottom: 0, left: 0, right: 0, inkW: 0, inkH: 0, clipped: false, ink: null };
     const left = Math.max(0, Math.min(head, x0 + ink.left));
     const right = Math.max(0, Math.min(head, x0 + ink.right));
@@ -68,21 +75,35 @@
     if (!el || !bitmap) return;
     const head = raster.headDots;
     const { width, height, data } = bitmap;
-    const rows = lead + height + tail;
-    el.width = head;
-    el.height = Math.max(1, rows);
+    el.width = previewWidth;
+    el.height = showA4 ? A4_HEIGHT : Math.max(1, paperRows);
     const ctx = el.getContext('2d')!;
-    const image = ctx.createImageData(head, Math.max(1, rows));
+    const image = ctx.createImageData(el.width, el.height);
     const px = new Uint32Array(image.data.buffer);
     px.fill(0xffffffff);
     const from = Math.max(0, -x0);
     const to = Math.min(width, head - x0);
-    for (let y = 0; y < height; y++) {
-      const src = y * width;
-      const dst = (lead + y) * head + x0;
-      for (let x = from; x < to; x++) if (data[src + x]) px[dst + x] = 0xff000000;
+    if (!blank) {
+      const visibleRows = Math.min(height, el.height - lead);
+      for (let y = 0; y < visibleRows; y++) {
+        const src = y * width;
+        const dst = (lead + y) * el.width + headLeft + x0;
+        for (let x = from; x < to; x++) if (data[src + x]) px[dst + x] = 0xff000000;
+      }
     }
     ctx.putImageData(image, 0, 0);
+
+    ctx.translate(headLeft, 0);
+    if (showA4 && paperRows < A4_HEIGHT) {
+      ctx.strokeStyle = '#64748b';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([18, 12]);
+      ctx.beginPath();
+      ctx.moveTo(-headLeft, paperRows);
+      ctx.lineTo(A4_WIDTH - headLeft, paperRows);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     const m = margins;
     if (!showMargins || !m) return;
@@ -109,7 +130,13 @@
   $effect(() => {
     const el = viewport;
     if (!el) return;
-    const update = () => (fitZoom = Math.max(MIN_ZOOM, (el.clientWidth - 24) / raster.headDots));
+    const width = previewWidth;
+    const a4 = showA4;
+    const update = () => {
+      const fitWidth = (el.clientWidth - 24) / width;
+      const fitHeight = (el.clientHeight - 24) / A4_HEIGHT;
+      fitZoom = Math.max(MIN_ZOOM, a4 ? Math.min(fitWidth, fitHeight) : fitWidth);
+    };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(el);
@@ -200,8 +227,11 @@
 <div class="card overflow-hidden">
   <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
     <span class="label">Preview · 1-bit, as printed {#if badge}<span class="ml-1 rounded-full bg-accent/15 px-2 py-0.5 text-accent">{badge}</span>{/if}</span>
-    <div class="flex items-center gap-1">
+    <div class="flex flex-wrap items-center gap-1">
       {#if busy}<span class="mr-1 text-xs text-dim" aria-live="polite">Rendering…</span>{/if}
+      <button type="button" class="btn btn-sm !px-2.5" disabled={!bitmap} aria-pressed={showA4} onclick={() => { showA4 = !showA4; zoom = 0; }}>
+        A4 portrait
+      </button>
       <button type="button" class="btn btn-sm !px-2.5" disabled={!bitmap} aria-pressed={showMargins} onclick={() => (showMargins = !showMargins)} title="Show margins">
         Margins
       </button>
@@ -211,7 +241,7 @@
         class="btn btn-sm w-16 !px-1 font-mono"
         disabled={!bitmap}
         onclick={() => (zoom ? (zoom = 0) : zoomTo(1))}
-        title={zoom ? 'Fit to width' : 'Actual dots (1 dot = 1 px)'}
+        title={zoom ? (showA4 ? 'Fit to page' : 'Fit to width') : 'Actual dots (1 dot = 1 px)'}
       >
         {zoom ? `${Math.round(scale * 100)}%` : 'Fit'}
       </button>
@@ -220,7 +250,7 @@
   </div>
   <div
     bind:this={viewport}
-    class="max-h-[46dvh] overflow-auto bg-raised p-3 lg:max-h-[calc(100dvh-19rem)] {dragging ? 'cursor-grabbing' : zoom ? 'cursor-grab' : ''}"
+    class="max-h-[46dvh] overflow-auto bg-raised p-3 lg:max-h-[calc(100dvh-19rem)] {showA4 && bitmap ? 'h-[46dvh] lg:h-[calc(100dvh-19rem)]' : ''} {dragging ? 'cursor-grabbing' : zoom ? 'cursor-grab' : ''}"
     style:touch-action="pan-x pan-y"
     role="presentation"
     ontouchstart={onTouchStart}
@@ -234,9 +264,9 @@
       <canvas
         bind:this={canvas}
         class="mx-auto block max-w-none bg-white shadow-md select-none"
-        style:width="{raster.headDots * scale}px"
+        style:width="{previewWidth * scale}px"
         style:image-rendering={scale >= 1 ? 'pixelated' : 'auto'}
-        aria-label="Print preview"
+        aria-label={showA4 ? 'Print preview on a portrait A4 sheet' : 'Print preview'}
       ></canvas>
     {:else}
       <div class="flex h-40 items-center justify-center text-center text-sm text-dim">
@@ -244,6 +274,16 @@
       </div>
     {/if}
   </div>
+  {#if showA4 && bitmap}
+    <p class="border-t border-line px-3 py-2 text-xs text-dim">
+      A4 portrait · 210 × 297 mm · Job length {mm(paperRows)} mm
+      {#if paperRows > A4_HEIGHT}
+        <span class="text-warn"> · Extends {mm(paperRows - A4_HEIGHT)} mm past the sheet</span>
+      {:else if paperRows < A4_HEIGHT}
+        · Dashed line marks the end of the job
+      {/if}
+    </p>
+  {/if}
   {#if margins && showMargins}
     <div class="border-t border-line px-3 py-2 text-xs">
       {#if margins.blank}

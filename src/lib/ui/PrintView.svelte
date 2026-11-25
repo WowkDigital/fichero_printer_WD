@@ -43,7 +43,7 @@
 <div class="mx-auto max-w-6xl p-4 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-start lg:gap-4">
   <!-- Preview column (sticky on wide screens) -->
   <div class="space-y-3 lg:sticky lg:top-4">
-    <Preview bitmap={app.bitmap} raster={s.raster} busy={app.rendering} badge={outputBadge} />
+    <Preview bitmap={app.bitmap} raster={s.raster} busy={app.rendering} badge={outputBadge} blank={s.output === 'blank'} />
     {#if stats}
       <dl class="grid grid-cols-2 gap-x-4 gap-y-2 px-1 text-sm sm:grid-cols-3">
         <div><dt class="text-xs text-dim">Bitmap</dt><dd class="font-mono text-[13px]">{stats.size}</dd></div>
@@ -58,6 +58,11 @@
 
   <!-- Controls column -->
   <div class="mt-4 space-y-3 lg:mt-0">
+    <div class="flex justify-end">
+      <button type="button" class="btn btn-sm" disabled={app.jobRunning} onclick={() => app.resetSettings()}>
+        Reset all settings to defaults
+      </button>
+    </div>
     <section class="card space-y-4 p-4">
       <Segmented
         label="Source"

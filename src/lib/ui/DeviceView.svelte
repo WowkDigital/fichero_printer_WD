@@ -121,7 +121,7 @@
   <Section title="Session settings" summary="Heartbeat every {app.settings.heartbeatSec || '—'} s">
     <Slider label="Heartbeat interval" bind:value={() => app.settings.heartbeatSec, (v) => app.setHeartbeat(v)} min={0} max={60} unit="s" hint="Status and battery poll that keeps the link alive. 0 turns it off." />
     <Toggle label="Show all Bluetooth devices" bind:checked={app.settings.showAllDevices} hint="Skip the name filter (FICHERO, D11s_, PeriPage) in the device chooser." />
-    <button type="button" class="btn btn-sm" onclick={() => app.resetSettings()}>Reset all settings to defaults</button>
+    <button type="button" class="btn btn-sm" disabled={app.jobRunning} onclick={() => app.resetSettings()}>Reset all settings to defaults</button>
   </Section>
 
   <p class="px-1 pb-2 text-xs text-dim">
