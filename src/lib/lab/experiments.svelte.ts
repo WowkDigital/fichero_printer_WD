@@ -181,8 +181,7 @@ export function runSweep() {
       const step = steps[i];
       app.jobDetail = `${i + 1} / ${steps.length} · ${step.label}`;
       const bmp = cfg.label ? stackBitmaps([labelBitmap(step.label, width), content], width, 4) : content;
-      const payload = app.buildPayload(bmp);
-      const result = await printer.print(payload, step.job, (p) => (app.jobProgress = p), signal);
+      const result = await app.printBitmap(printer, bmp, step.job, signal);
       const ok = !result.cancelled && result.acknowledged !== false;
       if (!ok) failures++;
       sweepResults.rows[i] = { label: step.label, ok, durationMs: result.durationMs, sentBytes: result.sentBytes };
@@ -199,8 +198,7 @@ export function printContactSheet(items: { variant: Variant; bitmap: Bitmap1 }[]
     const width = app.settings.raster.headDots;
     const parts = items.flatMap((item) => [labelBitmap(item.variant.label, width), item.bitmap]);
     const sheet = stackBitmaps(parts, width, 8);
-    const payload = app.buildPayload(sheet);
-    const result = await printer.print(payload, snapshot(app.settings.job), (p) => (app.jobProgress = p), signal);
+    const result = await app.printBitmap(printer, sheet, snapshot(app.settings.job), signal);
     return {
       ok: !result.cancelled && result.acknowledged !== false,
       detail: `${items.length} variants`,

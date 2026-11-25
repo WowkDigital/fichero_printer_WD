@@ -7,10 +7,10 @@
     open?: boolean;
     children: Snippet;
   }
-  let { title, summary = '', open = false, children }: Props = $props();
+  let { title, summary = '', open = $bindable(false), children }: Props = $props();
 </script>
 
-<details class="card group" {open}>
+<details class="card group" bind:open>
   <summary class="flex min-h-13 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2 [&::-webkit-details-marker]:hidden">
     <span class="min-w-0">
       <span class="block font-semibold">{title}</span>

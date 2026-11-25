@@ -52,7 +52,7 @@ BLE service `0x18F0`. Commands are written to characteristic `0x2AF1` (write wit
 | Enable | `10 FF FE 01` | |
 | Stop | `10 FF FE 45` | printer replies `AA` |
 | Raster image | `1D 76 30 00 xL xH yL yH` + data | GS v 0; 1-bit rows, MSB first; 204 bytes/row (1632 dots) or 210 bytes/row (1680 dots) at 203 dpi |
-| Feed | `1B 4A n` | ESC J n; 8 dots = 1 mm |
+| Feed | `10 FF F0 nL nH` | AiYin forward feed; 8 dots = 1 mm |
 | Form feed | `1D 0C` | |
 
 Default pacing: data is sent in 200-byte chunks, one chunk every 20 ms.

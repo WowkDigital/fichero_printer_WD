@@ -188,7 +188,7 @@ export class Printer {
    * Run a full print job: setup commands, paced raster transfer, stop + acknowledgement.
    * `payload` is the prebuilt raster stream (see buildRaster).
    */
-  print(payload: Uint8Array, opts: JobOptions, onProgress?: (p: JobProgress) => void, signal?: AbortSignal): Promise<JobResult> {
+  print(payload: Uint8Array, opts: JobOptions, onProgress?: (p: JobProgress) => void, signal?: AbortSignal, feedRows = 0): Promise<JobResult> {
     return this.enqueue(async () => {
       this.printing = true;
       const started = performance.now();
@@ -202,7 +202,7 @@ export class Printer {
           onProgress?.({ phase: 'data', sentBytes: n, totalBytes: payload.length, elapsedMs: elapsed() }),
         );
         onProgress?.({ phase: 'finish', sentBytes: sent, totalBytes: payload.length, elapsedMs: elapsed() });
-        acknowledged = await this.finishCommands(opts, signal);
+        acknowledged = await this.finishCommands(opts, signal, feedRows);
       } finally {
         this.printing = false;
       }
@@ -262,8 +262,9 @@ export class Printer {
   }
 
   /** Finish pause, then stop + wait for the ACK. Returns null when the stop command is disabled. */
-  private async finishCommands(opts: JobOptions, signal?: AbortSignal): Promise<boolean | null> {
+  private async finishCommands(opts: JobOptions, signal?: AbortSignal, feedRows = 0): Promise<boolean | null> {
     if (!signal?.aborted && opts.finishPauseMs > 0) await sleep(opts.finishPauseMs);
+    if (!signal?.aborted && feedRows > 0) await this.tx(Cmd.feedDots(feedRows), opts.writeWithResponse);
     if (!opts.sendStop) return null;
     const ack = this.waitForRx((rx) => rx.includes(STOP_ACK), opts.ackTimeoutMs);
     await this.tx(Cmd.stop());

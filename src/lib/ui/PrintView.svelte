@@ -3,7 +3,6 @@
   import { DOTS_PER_MM, HEAD_FULL, HEAD_STANDARD, TEAR_BAR_ROWS } from '../core/protocol';
   import { blackRatio } from '../image/dither';
   import { PATTERNS } from '../image/patterns';
-  import { AUTO_TONE_PRESETS, STATIC_TONE_PRESETS, autoTone } from '../image/tone-presets';
   import { DEFAULT_TONE, DIFFUSION_MODES, DITHER_MODES } from '../image/types';
   import { OUTPUT_MODES } from '../lab/config';
   import { formatBytes, formatDuration, formatPaper } from './format';
@@ -11,6 +10,7 @@
   import Section from './Section.svelte';
   import Segmented from './Segmented.svelte';
   import Slider from './Slider.svelte';
+  import TonePresetPreviews from './TonePresetPreviews.svelte';
   import Toggle from './Toggle.svelte';
 
   const s = $derived(app.settings);
@@ -32,21 +32,7 @@
   const isDiffusion = $derived(DIFFUSION_MODES.includes(s.tone.dither));
   const outputBadge = $derived(s.output === 'print' ? '' : (OUTPUT_MODES.find((m) => m.id === s.output)?.label ?? ''));
   const ditherLabel = $derived(DITHER_MODES.find((m) => m.id === s.tone.dither)?.label ?? '');
-  let appliedPreset = $state('');
-
-  function applyPreset(event: Event) {
-    const select = event.currentTarget as HTMLSelectElement;
-    const automatic = AUTO_TONE_PRESETS.find((preset) => preset.id === select.value);
-    const fixed = STATIC_TONE_PRESETS.find((preset) => preset.label === select.value);
-    if (automatic && app.image) {
-      s.tone = autoTone(app.image, automatic.id);
-      appliedPreset = automatic.label;
-    } else if (fixed) {
-      s.tone = { ...DEFAULT_TONE, ...fixed.tone };
-      appliedPreset = fixed.label;
-    }
-    select.value = '';
-  }
+  let presetsOpen = $state(false);
 
   function onFile(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
@@ -57,8 +43,7 @@
 </script>
 
 <div class="mx-auto max-w-6xl p-4 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-start lg:gap-4">
-  <!-- Preview column (sticky on wide screens) -->
-  <div class="space-y-3 lg:sticky lg:top-4">
+  <div class="space-y-3">
     <Preview bitmap={app.bitmap} raster={s.raster} busy={app.rendering} badge={outputBadge} blank={s.output === 'blank'} />
     {#if stats}
       <dl class="grid grid-cols-2 gap-x-4 gap-y-2 px-1 text-sm sm:grid-cols-3">
@@ -70,6 +55,9 @@
         <div><dt class="text-xs text-dim">Min. transfer time</dt><dd class="font-mono text-[13px]">{stats.time}</dd></div>
       </dl>
     {/if}
+    <Section title="Tone preset previews" bind:open={presetsOpen}>
+      {#if presetsOpen}<TonePresetPreviews />{/if}
+    </Section>
   </div>
 
   <!-- Controls column -->
@@ -169,23 +157,6 @@
 
     <Section title="Tone and dithering" summary="{ditherLabel} · gamma {s.tone.gamma}" open>
       <div>
-        <label class="label" for="tone-preset">Tone preset</label>
-        <select id="tone-preset" class="field mt-1.5" onchange={applyPreset}>
-          <option value="">Choose a preset</option>
-          <optgroup label="Fixed settings">
-            {#each STATIC_TONE_PRESETS as preset (preset.label)}
-              <option value={preset.label}>{preset.label}</option>
-            {/each}
-          </optgroup>
-          <optgroup label="Based on uploaded image" disabled={src.type !== 'image' || !app.image}>
-            {#each AUTO_TONE_PRESETS as preset (preset.id)}
-              <option value={preset.id}>{preset.label}</option>
-            {/each}
-          </optgroup>
-        </select>
-        <span class="sr-only" aria-live="polite">{appliedPreset ? `Applied ${appliedPreset}` : ''}</span>
-      </div>
-      <div>
         <label class="label" for="print-dither">Algorithm</label>
         <select id="print-dither" class="field mt-1.5" bind:value={s.tone.dither}>
           {#each DITHER_MODES as mode (mode.id)}
@@ -213,7 +184,8 @@
       </div>
     </Section>
 
-    <Section title="Paper layout" summary="{s.raster.headDots} dots · {s.raster.align} · tail {s.raster.tailRows} rows">
+    <section class="card space-y-4 p-4" aria-labelledby="paper-layout-title">
+      <h2 id="paper-layout-title" class="font-semibold">Paper layout</h2>
       <Segmented
         label="Head width"
         bind:value={s.raster.headDots}
@@ -234,7 +206,7 @@
       <Slider label="Horizontal offset" bind:value={s.raster.offsetDots} min={-400} max={400} unit="dots" />
       <Slider label="Blank rows before" bind:value={s.raster.leadRows} min={0} max={800} unit="rows" />
       <Slider
-        label="Blank rows after"
+        label="Feed after print"
         bind:value={s.raster.tailRows}
         min={0}
         max={800}
@@ -242,9 +214,10 @@
         hint="{TEAR_BAR_ROWS} rows (20 mm) pushes the print past the tear bar."
       />
       <Slider label="Rows per raster frame" bind:value={s.raster.bandRows} min={0} max={2000} step={8} unit="rows" hint="0 sends the whole job as one GS v 0 frame." />
-    </Section>
+    </section>
 
-    <Section title="Job and transport" summary="density {s.job.density} · {s.job.chunkSize} B / {s.job.chunkDelayMs} ms">
+    <section class="card space-y-4 p-4" aria-labelledby="job-transport-title">
+      <h2 id="job-transport-title" class="font-semibold">Job and transport</h2>
       <Segmented
         label="Density"
         bind:value={s.job.density}
@@ -266,6 +239,6 @@
         <Toggle label="Send stop and wait for ACK" mono="10 FF FE 45 → AA" bind:checked={s.job.sendStop} />
         <Toggle label="Write with response" bind:checked={s.job.writeWithResponse} hint="Slower, but each chunk is confirmed by the link layer." />
       </div>
-    </Section>
+    </section>
   </div>
 </div>

@@ -29,6 +29,18 @@ class SilentTransport implements Transport {
 
 const FAST: JobOptions = { ...DEFAULT_JOB, chunkSize: 10, chunkDelayMs: 1, finishPauseMs: 1, ackTimeoutMs: 1000 };
 
+it.each([0, 4])('feeds 320 rows before stop with a %i-byte raster payload', async (length) => {
+  const { printer, packets } = await connectMock();
+  const payload = payloadOf(length);
+  const print = printer.print(payload, FAST, undefined, undefined, 320);
+  await vi.runAllTimersAsync();
+  expect(await print).toMatchObject({ sentBytes: length, acknowledged: true });
+  const writes = packets.filter((packet) => packet.dir === 'tx');
+  expect(writes.at(-2)?.data).toEqual(Uint8Array.of(0x10, 0xff, 0xf0, 0x40, 0x01));
+  expect(writes.at(-1)?.data).toEqual(Cmd.stop());
+  if (length) expect(writes.at(-3)?.data).toEqual(payload);
+});
+
 function payloadOf(n: number): Uint8Array {
   // Starts with a byte that describeTx does not recognise.
   return Uint8Array.from({ length: n }, (_, i) => (i + 0x55) & 0xff);

@@ -205,14 +205,9 @@ class AppState {
   refresh = () => this.guard(() => this.printer.refresh());
   feed = (mm: number) =>
     this.guard(async () => {
-      // ESC J takes at most 255 rows per command.
-      let rows = Math.round(mm * DOTS_PER_MM);
-      const parts: Uint8Array[] = [];
-      while (rows > 0) {
-        parts.push(Cmd.feed(Math.min(255, rows)));
-        rows -= 255;
-      }
-      for (const part of parts) await this.printer.sendRaw(part);
+      const rows = Math.round(mm * DOTS_PER_MM);
+      const result = await this.printer.print(new Uint8Array(), $state.snapshot(this.settings.job), undefined, undefined, rows);
+      if (result.acknowledged === false) throw new Error('Feed sent, but the printer did not acknowledge the job.');
     });
   send = (data: Uint8Array) => this.guard(() => this.printer.sendRaw(data, this.settings.job.chunkSize, this.settings.job.chunkDelayMs));
 
@@ -317,7 +312,7 @@ class AppState {
   get payloadBytes(): number {
     if (!this.bitmap) return 0;
     const { raster } = this.settings;
-    const rows = this.paperRows;
+    const rows = this.bitmap.height + raster.leadRows;
     const frames = raster.bandRows > 0 ? Math.ceil(rows / raster.bandRows) : Math.ceil(rows / 0xffff);
     return rows * (raster.headDots / 8) + Math.max(1, frames) * 8;
   }
@@ -340,6 +335,11 @@ class AppState {
   /** Build the raster stream for `bmp` with the current layout (plus `patch`), honouring the output mode. */
   buildPayload(bmp: Bitmap1, patch: Partial<RasterOptions> = {}): Uint8Array {
     return buildRaster(this.outputBitmap(bmp), { ...$state.snapshot(this.settings.raster), ...patch });
+  }
+
+  printBitmap(printer: Printer, bmp: Bitmap1, job: JobOptions, signal: AbortSignal) {
+    const feedRows = Math.max(0, Math.round(this.settings.raster.tailRows));
+    return printer.print(this.buildPayload(bmp, { tailRows: 0 }), job, (progress) => (this.jobProgress = progress), signal, feedRows);
   }
 
   /** The printer jobs go to: the real one, or a private simulated one in simulate mode. */
@@ -404,15 +404,15 @@ class AppState {
     if (!bmp || !this.canRun) return;
     const paperRows = this.paperRows;
     await this.run('Print', async (printer, signal) => {
-      const payload = this.buildPayload(bmp);
-      const result = await printer.print(payload, $state.snapshot(this.settings.job), (progress) => (this.jobProgress = progress), signal);
+      const result = await this.printBitmap(printer, bmp, $state.snapshot(this.settings.job), signal);
       this.jobResult = result;
       return {
         ok: !result.cancelled && result.acknowledged !== false,
         detail: result.acknowledged === false ? 'Sent, no ACK from printer' : result.acknowledged ? 'ACK received' : 'Sent',
         sentBytes: result.sentBytes,
-        // A cancelled job only feeds the rows that made it across.
-        paperRows: result.totalBytes > 0 ? Math.round((paperRows * result.sentBytes) / result.totalBytes) : 0,
+        paperRows: result.cancelled && result.totalBytes > 0
+          ? Math.round(((paperRows - this.settings.raster.tailRows) * result.sentBytes) / result.totalBytes)
+          : paperRows,
         cancelled: result.cancelled,
       };
     });

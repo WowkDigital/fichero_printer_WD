@@ -33,6 +33,11 @@ export const Cmd = {
   stop: () => Uint8Array.of(0x10, 0xff, 0xfe, 0x45),
   /** ESC J n - feed n dot rows (0..255). */
   feed: (rows: number) => Uint8Array.of(0x1b, 0x4a, Math.max(0, Math.min(255, Math.round(rows)))),
+  /** AiYin forward feed, with a 16-bit little-endian dot count. */
+  feedDots: (rows: number) => {
+    const count = Math.max(0, Math.min(0xffff, Math.round(rows)));
+    return Uint8Array.of(0x10, 0xff, 0xf0, count & 0xff, count >> 8);
+  },
   /** GS FF - advance to the next page mark. */
   formFeed: () => Uint8Array.of(0x1d, 0x0c),
   /** GS v 0 header for a raster frame of `bytesPerRow` x `rows`. */
@@ -83,6 +88,10 @@ export function describeTx(data: Uint8Array): string | null {
   if (startsWith(data, [0x10, 0xff, 0x84]) && data.length >= 4) return `Set paper mode ${data[3]}`;
   if (startsWith(data, [0x10, 0xff, 0xfe, 0x01])) return 'Enable printer';
   if (startsWith(data, [0x10, 0xff, 0xfe, 0x45])) return 'Stop print';
+  if (startsWith(data, [0x10, 0xff, 0xf0]) && data.length >= 5) {
+    const rows = data[3] | (data[4] << 8);
+    return `Feed ${rows} rows (${(rows / DOTS_PER_MM).toFixed(1)} mm)`;
+  }
   if (startsWith(data, [0x1b, 0x4a]) && data.length >= 3) return `Feed ${data[2]} rows (${(data[2] / DOTS_PER_MM).toFixed(1)} mm)`;
   if (startsWith(data, [0x1d, 0x0c])) return 'Form feed';
   if (startsWith(data, [0x1d, 0x76, 0x30]) && data.length >= 8) {
