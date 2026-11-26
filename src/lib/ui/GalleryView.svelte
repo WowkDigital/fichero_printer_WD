@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { app } from '../app.svelte';
   import { DOTS_PER_MM } from '../core/protocol';
   import { blackRatio } from '../image/dither';
@@ -44,12 +45,13 @@
   const current = $derived(JSON.stringify(app.settings.tone));
   const ready = $derived(items.length > 0 && done === items.length && items.every((i) => i.bitmap));
   const truncated = $derived(app.bitmap ? app.bitmap.height > g.maxMm * DOTS_PER_MM : false);
+  let dragging = $state<HTMLElement | null>(null);
+  let dragStart = { x: 0, y: 0, left: 0, top: 0 };
 
   // Scroll all zoomed cards together so the same detail stays side by side.
   let syncing = false;
-  function syncScroll(event: Event) {
+  function syncScroll(source: HTMLElement) {
     if (syncing) return;
-    const source = event.currentTarget as HTMLElement;
     syncing = true;
     for (const el of document.querySelectorAll<HTMLElement>('[data-gallery-scroll]')) {
       if (el !== source) {
@@ -58,6 +60,50 @@
       }
     }
     requestAnimationFrame(() => (syncing = false));
+  }
+
+  function zoomOnWheel(viewport: HTMLDivElement, bitmapWidth: number) {
+    let width = bitmapWidth;
+    const onWheel = async (event: WheelEvent) => {
+      const canvas = viewport.querySelector('canvas');
+      if (!canvas || event.deltaY === 0) return;
+      event.preventDefault();
+      const rect = viewport.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const previous = canvas.getBoundingClientRect().width / width;
+      const fit = viewport.clientWidth / width;
+      const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1);
+      const next = Math.min(Math.max(8, fit), Math.max(fit, previous * Math.exp(-delta * 0.0025)));
+      const ratio = next / previous;
+      const left = (viewport.scrollLeft + x) * ratio - x;
+      const top = (viewport.scrollTop + y) * ratio - y;
+      g.zoom = next <= fit ? 0 : next;
+      await tick();
+      viewport.scrollLeft = left;
+      viewport.scrollTop = top;
+      syncScroll(viewport);
+    };
+    viewport.addEventListener('wheel', onWheel, { passive: false });
+    return {
+      update(bitmapWidth: number) { width = bitmapWidth; },
+      destroy() { viewport.removeEventListener('wheel', onWheel); },
+    };
+  }
+
+  function startDrag(event: PointerEvent) {
+    if (event.pointerType !== 'mouse' || event.button !== 0) return;
+    const viewport = event.currentTarget as HTMLDivElement;
+    if (viewport.scrollWidth <= viewport.clientWidth && viewport.scrollHeight <= viewport.clientHeight) return;
+    dragging = viewport;
+    dragStart = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
+    viewport.setPointerCapture(event.pointerId);
+  }
+
+  function drag(event: PointerEvent) {
+    if (!dragging || dragging !== event.currentTarget) return;
+    dragging.scrollLeft = dragStart.left - (event.clientX - dragStart.x);
+    dragging.scrollTop = dragStart.top - (event.clientY - dragStart.y);
   }
 </script>
 
@@ -119,7 +165,7 @@
   {#if !app.bitmap && app.settings.source.type === 'image' && !app.image}
     <p class="card p-6 text-center text-sm text-dim">Choose an image on the Print tab first.</p>
   {:else}
-    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div class="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {#each items as item (item.variant.label)}
         {@const active = JSON.stringify(item.variant.tone) === current}
         <article class="card overflow-hidden {active ? 'ring-2 ring-accent' : ''}">
@@ -137,9 +183,23 @@
               {active ? 'In use' : 'Use'}
             </button>
           </div>
-          <div class="max-h-80 overflow-auto bg-raised p-2" data-gallery-scroll onscroll={syncScroll}>
+          <div class="bg-raised p-2">
             {#if item.bitmap}
-              <BitmapCanvas bitmap={item.bitmap} scale={g.zoom} label={item.variant.label} />
+              <div
+                class="mx-auto overflow-auto bg-white select-none [scrollbar-width:none] {dragging ? 'cursor-grabbing' : 'cursor-grab'}"
+                style:width="min(100%, {item.bitmap.width}px, {(70 * item.bitmap.width) / item.bitmap.height}dvh)"
+                style:aspect-ratio="{item.bitmap.width} / {item.bitmap.height}"
+                data-gallery-scroll
+                use:zoomOnWheel={item.bitmap.width}
+                role="region"
+                aria-label="{item.variant.label} preview"
+                onscroll={(event) => syncScroll(event.currentTarget)}
+                onpointerdown={startDrag}
+                onpointermove={drag}
+                onlostpointercapture={() => (dragging = null)}
+              >
+                <BitmapCanvas bitmap={item.bitmap} scale={g.zoom} label={item.variant.label} />
+              </div>
             {:else}
               <div class="h-32 animate-pulse rounded bg-line/40"></div>
             {/if}

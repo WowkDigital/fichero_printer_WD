@@ -7,7 +7,6 @@
   import { OUTPUT_MODES } from '../lab/config';
   import { formatBytes, formatDuration, formatPaper } from './format';
   import Preview from './Preview.svelte';
-  import Section from './Section.svelte';
   import Segmented from './Segmented.svelte';
   import Slider from './Slider.svelte';
   import TonePresetPreviews from './TonePresetPreviews.svelte';
@@ -31,8 +30,14 @@
 
   const isDiffusion = $derived(DIFFUSION_MODES.includes(s.tone.dither));
   const outputBadge = $derived(s.output === 'print' ? '' : (OUTPUT_MODES.find((m) => m.id === s.output)?.label ?? ''));
-  const ditherLabel = $derived(DITHER_MODES.find((m) => m.id === s.tone.dither)?.label ?? '');
-  let presetsOpen = $state(false);
+  const cards = [
+    { id: 'source', label: 'Source' },
+    { id: 'tone', label: 'Tone and dithering' },
+    { id: 'presets', label: 'Tone preset previews' },
+    { id: 'paper', label: 'Paper layout' },
+    { id: 'job', label: 'Job and transport' },
+  ] as const;
+  let activeCard = $state<(typeof cards)[number]['id']>('source');
 
   function onFile(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
@@ -42,9 +47,7 @@
   }
 </script>
 
-<div class="mx-auto max-w-6xl p-4 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-start lg:gap-4">
-  <div class="space-y-3">
-    <Preview bitmap={app.bitmap} raster={s.raster} busy={app.rendering} badge={outputBadge} blank={s.output === 'blank'} />
+{#snippet printStats()}
     {#if stats}
       <dl class="grid grid-cols-2 gap-x-4 gap-y-2 px-1 text-sm sm:grid-cols-3">
         <div><dt class="text-xs text-dim">Bitmap</dt><dd class="font-mono text-[13px]">{stats.size}</dd></div>
@@ -55,19 +58,31 @@
         <div><dt class="text-xs text-dim">Min. transfer time</dt><dd class="font-mono text-[13px]">{stats.time}</dd></div>
       </dl>
     {/if}
-    <Section title="Tone preset previews" bind:open={presetsOpen}>
-      {#if presetsOpen}<TonePresetPreviews />{/if}
-    </Section>
+{/snippet}
+
+<div class="mx-auto max-w-6xl p-4 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-start lg:gap-4">
+  <div class="sticky top-0 z-10 space-y-3 bg-bg pb-2 lg:top-4">
+    <Preview bitmap={app.bitmap} raster={s.raster} busy={app.rendering} badge={outputBadge} blank={s.output === 'blank'} />
+    <div class="hidden lg:block">{@render printStats()}</div>
   </div>
 
   <!-- Controls column -->
   <div class="mt-4 space-y-3 lg:mt-0">
+    <div class="card flex flex-wrap gap-2 p-2" role="group" aria-label="Print settings">
+      {#each cards as card (card.id)}
+        <button type="button" class="btn btn-sm {activeCard === card.id ? 'btn-primary' : ''}"
+          aria-pressed={activeCard === card.id} aria-controls="print-settings-card" onclick={() => (activeCard = card.id)}>
+          {card.label}
+        </button>
+      {/each}
+    </div>
     <div class="flex justify-end">
       <button type="button" class="btn btn-sm" disabled={app.jobRunning} onclick={() => app.resetSettings()}>
         Reset all settings to defaults
       </button>
     </div>
-    <section class="card space-y-4 p-4">
+    <section id="print-settings-card" class="card space-y-4 p-4" aria-label={cards.find((card) => card.id === activeCard)?.label}>
+    {#if activeCard === 'source'}
       <Segmented
         label="Source"
         bind:value={src.type}
@@ -153,9 +168,7 @@
         <Slider label="Height" bind:value={src.pattern.heightMm} min={5} max={300} unit="mm" />
         <Slider label="Cell size" bind:value={src.pattern.cell} min={1} max={128} unit="dots" hint="Used by checker, stripes and grid." />
       {/if}
-    </section>
-
-    <Section title="Tone and dithering" summary="{ditherLabel} · gamma {s.tone.gamma}" open>
+    {:else if activeCard === 'tone'}
       <div>
         <label class="label" for="print-dither">Algorithm</label>
         <select id="print-dither" class="field mt-1.5" bind:value={s.tone.dither}>
@@ -182,10 +195,9 @@
         <button type="button" class="btn btn-sm" onclick={() => (app.settings.tone = { ...DEFAULT_TONE })}>Reset tone</button>
         <button type="button" class="btn btn-sm" onclick={() => (app.tab = 'gallery')}>Compare in gallery</button>
       </div>
-    </Section>
-
-    <section class="card space-y-4 p-4" aria-labelledby="paper-layout-title">
-      <h2 id="paper-layout-title" class="font-semibold">Paper layout</h2>
+    {:else if activeCard === 'presets'}
+      <TonePresetPreviews />
+    {:else if activeCard === 'paper'}
       <Segmented
         label="Head width"
         bind:value={s.raster.headDots}
@@ -214,10 +226,7 @@
         hint="{TEAR_BAR_ROWS} rows (20 mm) pushes the print past the tear bar."
       />
       <Slider label="Rows per raster frame" bind:value={s.raster.bandRows} min={0} max={2000} step={8} unit="rows" hint="0 sends the whole job as one GS v 0 frame." />
-    </section>
-
-    <section class="card space-y-4 p-4" aria-labelledby="job-transport-title">
-      <h2 id="job-transport-title" class="font-semibold">Job and transport</h2>
+    {:else if activeCard === 'job'}
       <Segmented
         label="Density"
         bind:value={s.job.density}
@@ -239,6 +248,8 @@
         <Toggle label="Send stop and wait for ACK" mono="10 FF FE 45 → AA" bind:checked={s.job.sendStop} />
         <Toggle label="Write with response" bind:checked={s.job.writeWithResponse} hint="Slower, but each chunk is confirmed by the link layer." />
       </div>
+    {/if}
     </section>
+    <div class="lg:hidden">{@render printStats()}</div>
   </div>
 </div>
